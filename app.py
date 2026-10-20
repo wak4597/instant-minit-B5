@@ -218,7 +218,8 @@ def extract_data_from_docx(file):
                 raw_data["jenis_entiti"] = col_1_text if col_1_text else re.sub(r'(?i)Jenis (Usaha|urus) Nia`?ga\s*:?', '', combined_row_text).strip()
                 
             # --- 9. Orang Yang Diberi Kuasa (OYDK) ---
-            elif "Orang Yang Diberi Kuasa" in col_0_text or "OYDK" in col_0_text:
+            elif col_0_text.strip().lower().startswith(("orang yang diberi kuasa", "oydk")):
+                # .startswith() prevents overwriting if "OYDK" is mentioned randomly in a later paragraph
                 raw_data["oydk"] = col_1_text if col_1_text else re.sub(r'(?i)(Orang Yang Diberi Kuasa(\s*\(OYDK\))?|OYDK)\s*:?', '', combined_row_text).strip()
                 
             # --- 10. Tarikh Diterima ---
