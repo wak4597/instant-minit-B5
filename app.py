@@ -205,7 +205,8 @@ def extract_data_from_docx(file):
                 raw_data["butiran_peluasan"] = col_1_text if col_1_text else re.sub(r'(?i)Butir(an|-butir) Peluasan( atau Pengubahan)?\s*:?', '', combined_row_text).strip()
 
             # --- 6. Kapasiti ---
-            elif col_0_lower.startswith(("kapasiti", "saiz", "bilangan katil")):
+            elif col_0_text.strip().lower().startswith(("kapasiti", "saiz", "bilangan katil")):
+                # .startswith() catches "Saiz/Kapasiti" and "Bilangan Katil..." without triggering on random text mid-paragraph
                 raw_data["kapasiti"] = col_1_text if col_1_text else re.sub(r'(?i)(Saiz/Kapasiti|Kapasiti|Bilangan Katil.*?)\s*:?', '', combined_row_text).strip()
                 
             # --- 7. No Lesen & Tarikh ---
