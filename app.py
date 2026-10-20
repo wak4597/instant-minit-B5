@@ -16,7 +16,7 @@ ENGLISH_WORDS = [
     "Health Screening Unit",
     "Endoscopy Unit",
     "Daycare Ward",     "accident", "activities", "adl", "administration", "administrator",
-    "affiliated", "amp", "and", "angiografi", "area", "assessment",
+    "affiliated", "angiography", "area", "assessment",
     "association", "asthma", "autoclave", "avenue", "barrier", "based", "basement",
     "bay", "bays", "beam", "bed", "bedded", "bereavement", "block",
     "bobath", "brachytherapy", "breastfeeding", "bulk", "bunker",
