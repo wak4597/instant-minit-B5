@@ -203,10 +203,10 @@ def extract_data_from_docx(file):
             # --- 5. Butiran Peluasan ---
             elif "Butiran Peluasan" in col_0_text or "Butir-butir Peluasan" in col_0_text:
                 raw_data["butiran_peluasan"] = col_1_text if col_1_text else re.sub(r'(?i)Butir(an|-butir) Peluasan( atau Pengubahan)?\s*:?', '', combined_row_text).strip()
-                
+
             # --- 6. Kapasiti ---
-            elif "Kapasiti" in col_0_text or "Saiz" in col_0_text:
-                raw_data["kapasiti"] = col_1_text if col_1_text else re.sub(r'(?i)(Saiz/)?Kapasiti\s*:?', '', combined_row_text).strip()
+            elif col_0_lower.startswith(("kapasiti", "saiz", "bilangan katil")):
+                raw_data["kapasiti"] = col_1_text if col_1_text else re.sub(r'(?i)(Saiz/Kapasiti|Kapasiti|Bilangan Katil.*?)\s*:?', '', combined_row_text).strip()
                 
             # --- 7. No Lesen & Tarikh ---
             elif "Tarikh Sah Lesen" in col_0_text or "Tarikh Luput Lesen" in col_0_text or "Butiran Lesen" in col_0_text or "No. Lesen" in col_0_text:
