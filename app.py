@@ -67,7 +67,7 @@ ENGLISH_WORDS = [
 BOLD_WORDS = [
     "Nama:",
     "No. K/P:",
-    "Kelayakan:"
+    "Kelayakan:", "No. Lesen", "Tarikh Sah Lesen:", "(Borang 7):", "(Borang 4):"
 ]
 
 def format_rich_text(text, italic_words, bold_words):
