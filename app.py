@@ -307,8 +307,8 @@ def extract_data_from_docx(file):
             elif "No. Pendaftaran" in col_0_text:
                 raw_data["no_pendaftaran"] = col_1_text if col_1_text else re.sub(r'(?i)No\. Pendaftaran( Syarikat)?\s*:?', '', combined_row_text).strip()
                 
-            # --- 14. Ulasan CKAPS (Handles BOTH nested tables & inline content in the same row) ---
-            elif "Ulasan Pelan Lantai" in combined_row_text:
+            # --- 14. Ulasan Pelan Lantai (Maps to {{ ulasan_ckaps }} in Output.docx) ---
+            elif re.search(r'(?i)(?:^[a-z0-9]+[\.\)]\s*)?Ulasan\s+Pelan\s+Lantai', col_0_text) or "Ulasan Pelan Lantai" in combined_row_text:
                 capture_ckaps = True
                 capture_sekretariat = False
                 capture_keputusan = False
@@ -321,13 +321,18 @@ def extract_data_from_docx(file):
                         row_full_parts.append(cell_full)
                 
                 full_row_str = "\n".join(row_full_parts)
-                # Remove the "Ulasan Pelan Lantai:" label so only the actual review remains
-                cleaned_ckaps = re.sub(r'(?i)Ulasan Pelan Lantai\s*:?', '', full_row_str).strip()
+                # Strip the "g. Ulasan Pelan Lantai:" label while preserving any inline text or nested table below it
+                cleaned_ckaps = re.sub(r'(?im)^(?:[a-z0-9]+[\.\)]\s*)?Ulasan\s+Pelan\s+Lantai\s*:?\s*', '', full_row_str).strip()
                 if cleaned_ckaps:
                     raw_data["ulasan_ckaps"] += cleaned_ckaps + "\n"
                 continue
                 
-            # --- 15. Ulasan Sekretariat ---
+            # --- 15. Ringkasan Minit (Stops Ulasan Pelan Lantai capture if present before Ulasan Sekretariat) ---
+            elif re.search(r'(?i)^Ringkasan\s+Minit\s*:?', col_0_text):
+                capture_ckaps = False
+                continue
+
+            # --- 16. Ulasan Sekretariat ---
             elif "Ulasan Sekretariat" in col_0_text or "Ulasan Sekreteriat" in col_0_text:
                 capture_ckaps = False
                 capture_sekretariat = True
@@ -351,7 +356,7 @@ def extract_data_from_docx(file):
 
             # --- Multi-Row Active Appends ---
             if capture_ckaps:
-                # Extract cell content including nested tables if the content is in subsequent rows
+                # Extract cell content including nested tables from the cell(s) below the Ulasan Pelan Lantai row
                 row_full_parts = []
                 for cell in unique_cells:
                     cell_full = extract_cell_content_with_nested_tables(cell)
@@ -374,7 +379,7 @@ def extract_data_from_docx(file):
                     col2 = row_full_parts[1].lstrip(":-–— ").strip()
                     line = f"{row_full_parts[0]} – {col2}"
                 else:
-                    line = " ".join(row_full_parts).strip()
+                    line = "\n".join(row_full_parts).strip()
 
                 if line:
                     raw_data["ulasan_ckaps"] += line + "\n"
