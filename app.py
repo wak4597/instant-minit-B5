@@ -116,47 +116,52 @@ def format_rich_text(text, italic_words, bold_words):
 
 def extract_cell_content_with_nested_tables(cell):
     """
-    Iterates through a table cell's XML children in exact document order,
-    extracting both normal paragraphs AND any nested tables inside the cell.
+    Iterates through a table cell's XML children in exact document order
+    (including inside <w:sdt> content controls), extracting both normal
+    paragraphs AND any nested tables inside the cell.
     """
     lines = []
-    for child in cell._tc.iterchildren():
-        if isinstance(child, CT_P):
-            para = Paragraph(child, cell)
-            text = para.text.strip()
-            if text:
-                lines.append(text)
-        elif isinstance(child, CT_Tbl):
-            nested_table = Table(child, cell)
-            for n_row in nested_table.rows:
-                # Deduplicate horizontally merged cells within the nested row
-                seen_tcs = set()
-                row_parts = []
-                for n_cell in n_row.cells:
-                    if n_cell._tc in seen_tcs:
+
+    def _walk_tc_children(parent_el):
+        for child in parent_el.iterchildren():
+            if isinstance(child, CT_P):
+                para = Paragraph(child, cell)
+                text = para.text.strip()
+                if text:
+                    lines.append(text)
+            elif isinstance(child, CT_Tbl):
+                nested_table = Table(child, cell)
+                for n_row in nested_table.rows:
+                    seen_tcs = set()
+                    row_parts = []
+                    for n_cell in n_row.cells:
+                        if n_cell._tc in seen_tcs:
+                            continue
+                        seen_tcs.add(n_cell._tc)
+                        cell_txt = " ".join(n_cell.text.split()).strip()
+                        if cell_txt:
+                            row_parts.append(cell_txt)
+
+                    if not row_parts:
                         continue
-                    seen_tcs.add(n_cell._tc)
-                    cell_txt = " ".join(n_cell.text.split()).strip()
-                    if cell_txt:
-                        row_parts.append(cell_txt)
 
-                if not row_parts:
-                    continue
+                    # Skip header rows like ["TARIKH", "ULASAN"]
+                    first_col_clean = row_parts[0].lower().rstrip(":")
+                    if first_col_clean == "tarikh" and (len(row_parts) == 1 or "ulasan" in row_parts[-1].lower()):
+                        continue
 
-                # Skip header rows like ["TARIKH", "ULASAN"]
-                first_col_clean = row_parts[0].lower().rstrip(":")
-                if first_col_clean == "tarikh" and (len(row_parts) == 1 or "ulasan" in row_parts[-1].lower()):
-                    continue
+                    # Format cleanly as "Tarikh – Ulasan"
+                    if len(row_parts) >= 3 and row_parts[1] in [":", "-", "–", "—"]:
+                        lines.append(f"{row_parts[0]} – {' '.join(row_parts[2:])}")
+                    elif len(row_parts) == 2:
+                        col2 = row_parts[1].lstrip(":-–— ").strip()
+                        lines.append(f"{row_parts[0]} – {col2}")
+                    else:
+                        lines.append(" ".join(row_parts))
+            elif child.tag.endswith('}sdt') or child.tag.endswith('}sdtContent'):
+                _walk_tc_children(child)
 
-                # Format cleanly as "Tarikh – Ulasan"
-                if len(row_parts) >= 3 and row_parts[1] in [":", "-", "–", "—"]:
-                    lines.append(f"{row_parts[0]} – {' '.join(row_parts[2:])}")
-                elif len(row_parts) == 2:
-                    col2 = row_parts[1].lstrip(":-–— ").strip()
-                    lines.append(f"{row_parts[0]} – {col2}")
-                else:
-                    lines.append(" ".join(row_parts))
-
+    _walk_tc_children(cell._tc)
     return "\n".join(lines)
 
 
@@ -176,13 +181,15 @@ def get_unique_row_cells(row):
 def iter_block_items(parent):
     """
     Yields each paragraph and table child within `parent` (e.g. doc.element.body)
-    in the exact order they appear in the Word document.
+    in the exact order they appear in the Word document, unwrapping any <w:sdt>.
     """
     for child in parent.iterchildren():
         if isinstance(child, CT_P):
             yield Paragraph(child, parent)
         elif isinstance(child, CT_Tbl):
             yield Table(child, parent)
+        elif child.tag.endswith('}sdt') or child.tag.endswith('}sdtContent'):
+            yield from iter_block_items(child)
 
 
 def extract_data_from_docx(file):
@@ -329,7 +336,9 @@ def extract_data_from_docx(file):
                     raw_data["no_pendaftaran"] = col_1_text if col_1_text else re.sub(r'(?i)No\. Pendaftaran( Syarikat)?\s*:?', '', combined_row_text).strip()
                     
                 # --- 14. Ulasan Pelan Lantai (Maps to {{ ulasan_ckaps }} in Output.docx) ---
-                elif re.search(r'(?i)(?:^[a-z0-9]+[\.\)]\s*)?Ulasan\s+Pelan\s+Lantai', col_0_text) or "Ulasan Pelan Lantai" in combined_row_text:
+                elif re.search(r'(?i)(?:^[a-z0-9]+[\.\)]\s*)?Ulasan\s+Pelan\s+Lantai', col_0_text) or (
+                    not capture_ckaps and "Ulasan Pelan Lantai" in combined_row_text
+                ):
                     capture_ckaps = True
                     capture_sekretariat = False
                     capture_keputusan = False
@@ -346,12 +355,7 @@ def extract_data_from_docx(file):
                         raw_data["ulasan_ckaps"] += cleaned_ckaps + "\n"
                     continue
                     
-                # --- 15. Ringkasan Minit ---
-                elif re.search(r'(?i)^Ringkasan\s+Minit\s*:?', col_0_text):
-                    capture_ckaps = False
-                    continue
-
-                # --- 16. Ulasan Sekretariat ---
+                # --- 15. Ulasan Sekretariat ---
                 elif "Ulasan Sekretariat" in col_0_text or "Ulasan Sekreteriat" in col_0_text:
                     capture_ckaps = False
                     capture_sekretariat = True
@@ -450,10 +454,6 @@ def extract_data_from_docx(file):
                     raw_data["ulasan_ckaps"] += val + "\n"
                 continue
 
-            if re.search(r'(?i)^Ringkasan\s+Minit\s*:?', text):
-                capture_ckaps = False
-                continue
-                
             if "Ulasan Sekretariat" in text or "Ulasan Sekreteriat" in text:
                 capture_ckaps = False
                 capture_sekretariat = True
