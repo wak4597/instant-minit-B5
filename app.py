@@ -1,5 +1,9 @@
 import streamlit as st
 import docx
+from docx.oxml.table import CT_Tbl
+from docx.oxml.text.paragraph import CT_P
+from docx.table import Table
+from docx.text.paragraph import Paragraph
 from docxtpl import DocxTemplate, RichText
 import re
 import io
@@ -12,28 +16,28 @@ ENGLISH_WORDS = [
     "Treatment Room", 
     "Consultation Room", 
     "Optometrist Room", 
-    "Special Care Nursery",
-    "Health Screening Unit",
-    "Endoscopy Unit",
-    "Daycare Ward",     "accident", "activities", "adl", "administration", "administrator",
+    "Special Care Nursery", 
+    "Health Screening Unit", 
+    "Endoscopy Unit", 
+    "Daycare Ward", "accident", "activities", "adl", "administration", "administrator",
     "affiliated", "angiography", "area", "assessment",
     "association", "asthma", "autoclave", "avenue", "barrier", "based", "basement",
     "bay", "bays", "beam", "bed", "bedded", "bereavement", "block",
     "bobath", "brachytherapy", "breastfeeding", "bulk", "bunker",
-    "business", "c-arm", "cafeteria", "care", "cashier", "catheterization",
+    "business", "c-arm", "cafeteria", "cardiac", "Cardiothoracic", "care", "cashier", "catheterization",
     "centre", "chair", "changing", "chemotherapy", "children", "clean",
     "clinic", "clinical", "clinics", "closet", "cold", "collection",
     "community", "cone", "consumable", "corridor", "couch", "counselling",
     "counter", "crrt", "cssd", "cssu", "cytotoxic", "day", "daycare",
     "dayward", "dental", "department", "desk", "dialysis", "dining",
     "dirty", "disposal", "district", "doctor's", "double", "double-bedded",
-    "drug", "east", "echo", "ecg", "eeg", "endoscopy", "entrance",
+    "drug", "east", "echo", "ecg", "eeg", "emergency", "endoscopy", "entrance",
     "equipment", "examination", "exam", "executive", "existing",
     "extended", "eye", "facilities", "facillities", "female", "fertility",
     "filing", "first", "floor", "focused", "four",
     "four-bedded", "function", "gamma", "general", "ground", "gym",
     "gymnasium", "haemodialysis", "hand", "hdu", "health", "high",
-    "holding", "home", "hospice", "hospital", "hot", "icu", "imaging",
+    "holding", "home", "hospice", "hot", "icu", "imaging",
     "inhouse", "intensity", "intermediate", "international", "intra",
     "isolation", "janitor", "janitor's", "joint", "knife",
     "laboratory", "laser", "ldr", "level", "lift", "linear", "lobby",
@@ -41,12 +45,12 @@ ENGLISH_WORDS = [
     "maternity", "medical", "medication", "medicine", "meeting",
     "mezzanine", "minor", "mobile", "multidisiplin", "negative",
     "nephrologist", "nerve", "new", "non-hepatitis", "nurse", "nursery",
-    "nursing", "observation", "occupational", "off", "office", "oncology",
+    "nursing", "observation", "occupational", "office", "oncology",
     "open", "operation", "optometrist", "optometry", "oral", "orthopaedic",
     "outpatient", "outsourced", "palliative", "park", "patient", "pediatric",
     "pharmacy", "physical", "physio", "physiotherapy", "physician's",
     "plastic", "play", "positive", "prep", "preparation", "pressure",
-    "private", "procedure", "processing", "public", "quarantine",
+    "private", "procedure", "processing", "public", "quarantine", "radiography",
     "radiology", "radiologist", "reception", "reconstitution", "record",
     "recovery", "refuge", "registration", "rehab", "rehabilitation",
     "relokasi", "reporting", "resusitasi", "retail", "robotic", "room",
@@ -58,7 +62,7 @@ ENGLISH_WORDS = [
     "support", "surgery", "surgical", "table", "tea", "technical", "test",
     "theatre", "therapy", "third", "three", "three-bedded", "toilet",
     "tower", "traction", "training", "treadmill", "treatment", "triage",
-    "trolley", "ultrasound", "unit", "utility", "vacant", "vascular",
+    "trolley", "ultrasound", "utility", "vacant", "vascular",
     "vertigo", "vestibular", "vision", "visiting", "volunteer", "waiting",
     "ward", "wheelchair", "wing", "women's", "x-ray"
 ]
@@ -69,6 +73,7 @@ BOLD_WORDS = [
     "No. K/P:",
     "Kelayakan:", "No. Lesen", "Tarikh Sah Lesen:", "(Borang 7):", "(Borang 4):", "diperakui", "diperakui dengan terma atau syarat"
 ]
+
 
 def format_rich_text(text, italic_words, bold_words):
     """
@@ -86,7 +91,7 @@ def format_rich_text(text, italic_words, bold_words):
     bold_pattern = re.compile(r'^(' + '|'.join(map(re.escape, bold_words)) + r')$', re.IGNORECASE)
     
     rt = RichText()
-    FONT_KWARGS = {'font': 'Arial', 'size': 18} # 9 pt = 18 half-points
+    FONT_KWARGS = {'font': 'Arial', 'size': 18}  # 9 pt = 18 half-points
     
     parts = main_pattern.split(text)
     
@@ -108,6 +113,66 @@ def format_rich_text(text, italic_words, bold_words):
             
     return rt
 
+
+def extract_cell_content_with_nested_tables(cell):
+    """
+    Iterates through a table cell's XML children in exact document order,
+    extracting both normal paragraphs AND any nested tables inside the cell.
+    """
+    lines = []
+    for child in cell._tc.iterchildren():
+        if isinstance(child, CT_P):
+            para = Paragraph(child, cell)
+            text = para.text.strip()
+            if text:
+                lines.append(text)
+        elif isinstance(child, CT_Tbl):
+            nested_table = Table(child, cell)
+            for n_row in nested_table.rows:
+                # Deduplicate horizontally merged cells within the nested row
+                seen_tcs = set()
+                row_parts = []
+                for n_cell in n_row.cells:
+                    if n_cell._tc in seen_tcs:
+                        continue
+                    seen_tcs.add(n_cell._tc)
+                    cell_txt = " ".join(n_cell.text.split()).strip()
+                    if cell_txt:
+                        row_parts.append(cell_txt)
+
+                if not row_parts:
+                    continue
+
+                # Skip header rows like ["TARIKH", "ULASAN"]
+                first_col_clean = row_parts[0].lower().rstrip(":")
+                if first_col_clean == "tarikh" and (len(row_parts) == 1 or "ulasan" in row_parts[-1].lower()):
+                    continue
+
+                # Format cleanly as "Tarikh – Ulasan"
+                if len(row_parts) >= 3 and row_parts[1] in [":", "-", "–", "—"]:
+                    lines.append(f"{row_parts[0]} – {' '.join(row_parts[2:])}")
+                elif len(row_parts) == 2:
+                    col2 = row_parts[1].lstrip(":-–— ").strip()
+                    lines.append(f"{row_parts[0]} – {col2}")
+                else:
+                    lines.append(" ".join(row_parts))
+
+    return "\n".join(lines)
+
+
+def get_unique_row_cells(row):
+    """
+    Returns unique cell objects in a row (avoiding duplicates caused by merged cells).
+    """
+    unique_cells = []
+    seen_tcs = set()
+    for cell in row.cells:
+        if cell._tc not in seen_tcs:
+            seen_tcs.add(cell._tc)
+            unique_cells.append(cell)
+    return unique_cells
+
+
 def extract_data_from_docx(file):
     doc = docx.Document(file)
     
@@ -122,7 +187,7 @@ def extract_data_from_docx(file):
     }
     
     # ---------------------------------------------------------
-    # 1. SWEEP TABLES (Extracts data from within table cells)
+    # 1. SWEEP TABLES (Extracts data from within table cells & nested tables)
     # ---------------------------------------------------------
     capture_ckaps = False
     capture_sekretariat = False
@@ -131,8 +196,9 @@ def extract_data_from_docx(file):
     
     for table in doc.tables:
         for row in table.rows:
+            unique_cells = get_unique_row_cells(row)
             row_texts = []
-            for cell in row.cells:
+            for cell in unique_cells:
                 text = cell.text.strip()
                 if text and text != ":" and (not row_texts or text != row_texts[-1]):
                     row_texts.append(text)
@@ -189,7 +255,8 @@ def extract_data_from_docx(file):
                     raw_data["no_siri_kemudahan"] = match.group(1).replace(')', '').strip()
                 if "Terma Atau Syarat:" in combined_row_text or "Terma atau Syarat:" in combined_row_text:
                     ts = re.split(r'(?i)Terma Atau Syarat:', combined_row_text)
-                    if len(ts) > 1: raw_data["t_s"] = ts[1].strip()
+                    if len(ts) > 1:
+                        raw_data["t_s"] = ts[1].strip()
                         
             # --- 4. Jenis Perkhidmatan ---
             elif "Jenis Perkhidmatan" in col_0_text:
@@ -198,7 +265,8 @@ def extract_data_from_docx(file):
                     raw_data["no_siri_perkhidmatan"] = match.group(1).replace(')', '').strip()
                 if "Terma Atau Syarat:" in combined_row_text or "Terma atau Syarat:" in combined_row_text:
                     ts = re.split(r'(?i)Terma Atau Syarat:', combined_row_text)
-                    if len(ts) > 1: raw_data["t_s"] = ts[1].strip()
+                    if len(ts) > 1:
+                        raw_data["t_s"] = ts[1].strip()
                         
             # --- 5. Butiran Peluasan ---
             elif "Butiran Peluasan" in col_0_text or "Butir-butir Peluasan" in col_0_text:
@@ -206,13 +274,13 @@ def extract_data_from_docx(file):
 
             # --- 6. Kapasiti ---
             elif col_0_text.strip().lower().startswith(("kapasiti", "saiz", "bilangan katil")):
-                # .startswith() catches "Saiz/Kapasiti" and "Bilangan Katil..." without triggering on random text mid-paragraph
                 raw_data["kapasiti"] = col_1_text if col_1_text else re.sub(r'(?i)(Saiz/Kapasiti|Kapasiti|Bilangan Katil.*?)\s*:?', '', combined_row_text).strip()
                 
             # --- 7. No Lesen & Tarikh ---
             elif "Tarikh Sah Lesen" in col_0_text or "Tarikh Luput Lesen" in col_0_text or "Butiran Lesen" in col_0_text or "No. Lesen" in col_0_text:
                 val = col_1_text if col_1_text else re.sub(r'(?i)(Tarikh (Sah|Luput) Lesen|Butiran Lesen|No\. Lesen(\s*\(Borang\s*\d+\))?)\s*:?', '', combined_row_text).strip()
-                if val: raw_data["no_lesen_tarikh"] += f"{val}\n"
+                if val:
+                    raw_data["no_lesen_tarikh"] += f"{val}\n"
                 
             # --- 8. Jenis Usaha Niaga ---
             elif "Jenis Usaha Niaga" in col_0_text or "Jenis urus niaga" in col_0_text:
@@ -220,7 +288,6 @@ def extract_data_from_docx(file):
                 
             # --- 9. Orang Yang Diberi Kuasa (OYDK) ---
             elif col_0_text.strip().lower().startswith(("orang yang diberi kuasa", "oydk")):
-                # .startswith() prevents overwriting if "OYDK" is mentioned randomly in a later paragraph
                 raw_data["oydk"] = col_1_text if col_1_text else re.sub(r'(?i)(Orang Yang Diberi Kuasa(\s*\(OYDK\))?|OYDK)\s*:?', '', combined_row_text).strip()
                 
             # --- 10. Tarikh Diterima ---
@@ -240,11 +307,24 @@ def extract_data_from_docx(file):
             elif "No. Pendaftaran" in col_0_text:
                 raw_data["no_pendaftaran"] = col_1_text if col_1_text else re.sub(r'(?i)No\. Pendaftaran( Syarikat)?\s*:?', '', combined_row_text).strip()
                 
-            # --- 14. Ulasan CKAPS ---
-            elif "Ulasan Pelan Lantai" in col_0_text:
+            # --- 14. Ulasan CKAPS (Handles BOTH nested tables & inline content in the same row) ---
+            elif "Ulasan Pelan Lantai" in combined_row_text:
                 capture_ckaps = True
                 capture_sekretariat = False
                 capture_keputusan = False
+                
+                # Extract full cell contents (including any nested tables inside this row's cells)
+                row_full_parts = []
+                for cell in unique_cells:
+                    cell_full = extract_cell_content_with_nested_tables(cell)
+                    if cell_full and cell_full != ":":
+                        row_full_parts.append(cell_full)
+                
+                full_row_str = "\n".join(row_full_parts)
+                # Remove the "Ulasan Pelan Lantai:" label so only the actual review remains
+                cleaned_ckaps = re.sub(r'(?i)Ulasan Pelan Lantai\s*:?', '', full_row_str).strip()
+                if cleaned_ckaps:
+                    raw_data["ulasan_ckaps"] += cleaned_ckaps + "\n"
                 continue
                 
             # --- 15. Ulasan Sekretariat ---
@@ -254,7 +334,8 @@ def extract_data_from_docx(file):
                 capture_keputusan = False
                 
                 val = col_1_text if col_1_text else re.sub(r'(?i)Ulasan Sekret[ea]riat:?', '', col_0_text).strip()
-                if val: raw_data["cadangan_sekretariat"] += val + "\n"
+                if val:
+                    raw_data["cadangan_sekretariat"] += val + "\n"
                 continue
                 
             # --- 16. Keputusan ---
@@ -264,22 +345,50 @@ def extract_data_from_docx(file):
                 capture_keputusan = True
                 
                 val = col_1_text if col_1_text else re.sub(r'(?i)Keputusan( Mesyuarat)?:?', '', col_0_text).strip()
-                if val: raw_data["keputusan"] += val + "\n"
+                if val:
+                    raw_data["keputusan"] += val + "\n"
                 continue
 
             # --- Multi-Row Active Appends ---
             if capture_ckaps:
-                line = f"{col_0_text} {col_1_text}".strip()
-                if line: raw_data["ulasan_ckaps"] += line + "\n"
+                # Extract cell content including nested tables if the content is in subsequent rows
+                row_full_parts = []
+                for cell in unique_cells:
+                    cell_full = extract_cell_content_with_nested_tables(cell)
+                    if cell_full and cell_full != ":":
+                        row_full_parts.append(cell_full)
+
+                if not row_full_parts:
+                    continue
+
+                # Skip standalone header row ["TARIKH", "ULASAN"]
+                if row_full_parts[0].strip().lower().rstrip(":") == "tarikh" and (
+                    len(row_full_parts) == 1 or "ulasan" in row_full_parts[-1].lower()
+                ):
+                    continue
+
+                # Format multi-column rows cleanly (e.g., Date | : | Description -> Date – Description)
+                if len(row_full_parts) >= 3 and row_full_parts[1].strip() in [":", "-", "–", "—"]:
+                    line = f"{row_full_parts[0]} – {' '.join(row_full_parts[2:])}"
+                elif len(row_full_parts) == 2 and re.match(r'^\d{1,2}\s+[A-Za-z]+\s+\d{4}', row_full_parts[0].strip()):
+                    col2 = row_full_parts[1].lstrip(":-–— ").strip()
+                    line = f"{row_full_parts[0]} – {col2}"
+                else:
+                    line = " ".join(row_full_parts).strip()
+
+                if line:
+                    raw_data["ulasan_ckaps"] += line + "\n"
             
             elif capture_sekretariat:
                 if not re.match(r'^\d+\.$', col_0_text.strip()):
                     line = " ".join(row_texts).strip()
-                    if line: raw_data["cadangan_sekretariat"] += line + "\n"
+                    if line:
+                        raw_data["cadangan_sekretariat"] += line + "\n"
             
             elif capture_keputusan:
                 line = " ".join(row_texts).strip()
-                if line: raw_data["keputusan"] += line + "\n"
+                if line:
+                    raw_data["keputusan"] += line + "\n"
 
     # ---------------------------------------------------------
     # 2. SWEEP PARAGRAPHS (Extracts data typed OUTSIDE tables)
@@ -315,14 +424,16 @@ def extract_data_from_docx(file):
             capture_sekretariat_para = True
             capture_keputusan_para = False
             val = re.sub(r'(?i)Ulasan Sekret[ea]riat:?', '', text).strip()
-            if val: raw_data["cadangan_sekretariat"] += val + "\n"
+            if val:
+                raw_data["cadangan_sekretariat"] += val + "\n"
             continue
             
         if "Keputusan Mesyuarat" in text or "KEPUTUSAN" in text or text.startswith("Keputusan:"):
             capture_sekretariat_para = False
             capture_keputusan_para = True
             val = re.sub(r'(?i)Keputusan( Mesyuarat)?:?', '', text).strip()
-            if val: raw_data["keputusan"] += val + "\n"
+            if val:
+                raw_data["keputusan"] += val + "\n"
             continue
             
         if capture_sekretariat_para:
@@ -331,7 +442,6 @@ def extract_data_from_docx(file):
                 
         if capture_keputusan_para:
             raw_data["keputusan"] += text + "\n"
-
 
     # ---------------------------------------------------------
     # 3. FORMATTING AND CLEANUP
@@ -344,6 +454,7 @@ def extract_data_from_docx(file):
 
     return rich_data
 
+
 def create_output_doc(data, template_path="Output.docx"):
     doc = DocxTemplate(template_path)
     doc.render(data)
@@ -352,6 +463,7 @@ def create_output_doc(data, template_path="Output.docx"):
     doc.save(file_stream)
     file_stream.seek(0)
     return file_stream
+
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="Buat Minit Borang 5 instant")
